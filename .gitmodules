@@ -2,4 +2,3 @@
 	path = third_party
 	url = https://github.com/facebookresearch/sam2.git
 
-masks_image
