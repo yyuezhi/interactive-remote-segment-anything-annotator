@@ -5,17 +5,16 @@
 This repository contains a Python tool for interactive **mask annotation** with support for:
 - Freehand painting / erasing
 - Point-based interactive segmentation (connected to a backend, e.g. SAM2 server)
-- Zooming and panning while preserving masks
 - Saving multiple formats of masks and overlays
 
-It is ideally suitable for senarios where you could only run SAM remotely without monitor but you want to do SAM interactively.
+It is ideally suitable for senarios where you could only run SAM remotely without monitor but you want to do SAM anotation interactively.
 
 ## Install
 1. Setup SAM2 at https://github.com/facebookresearch/sam2/tree/main
 2. Establish SSH link using: ```ssh -L 8003:localhost:8003 [username]@[servername]  (change your own port)```
 3. Put backend.py at server and run 
-```python backend.py --host 0.0.0.0 --port 8003```
-4. At local end, ```python frontend.py``` (You may need to change port)
+```python backend.py --host 0.0.0.0 --port 8003``` (You may need to change port)
+4. At local end, ```python frontend.py``` 
 
 ## Controls
 

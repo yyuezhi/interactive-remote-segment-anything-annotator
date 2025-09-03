@@ -14,19 +14,29 @@ OUT_DIR = "masks_image"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 SERVER_HOST = "localhost"
-SERVER_PORT = 8009  # per your server
+SERVER_PORT = 8003  # your server port
 
+# Renamed + expanded saving options:
+# - "image_mask_multi":  save image with ALL labels kept (background black)
+# - "image_mask_single": save image-per-label (only that label kept, background black)
 SAVE_OPTIONS = {
-    "image_mask":  True,  # save image with only labeled pixels (background black)
-    "overlay":     True,  # save image + transparent overlay of all labels
-    "label_single":True,  # save per-label binary PNGs (one PNG per label that has pixels)
-    "label_multi": True,  # save pure colored label PNG (all labels together)
+    "image_mask_multi":  True,
+    "image_mask_single": True,
+    "overlay":           True,  # image + transparent overlay of all labels
+    "label_single":      True,  # per-label binary PNGs (one PNG per label that has pixels)
+    "label_multi":       True,  # pure colored label PNG (all labels together)
 }
 
 # UI look/feel
-MASK_RADIUS_DISP = 10           # brush radius in DISPLAY pixels
 MASK_BLEND_ALPHA = 0.5          # overlay alpha
 ZOOM_FACTOR      = 1.2          # wheel zoom step
+
+# ---- Brush (relative to display size) ----
+# Radius in DISPLAY pixels = BRUSH_REL * min(display_width, display_height)
+# Adjust at runtime with keys: f (smaller), g (larger)
+BRUSH_MIN_REL = 0.002
+BRUSH_MAX_REL = 0.10
+BRUSH_REL     = 0.010  # start at 1% of the shorter display side
 
 # ============================
 # Globals
@@ -61,23 +71,26 @@ rect_end   = None
 drawing_paint = False
 
 # Labels (RGB palette; convert to BGR for cv2 when needed)
+# Expanded to 20 labels
 mask_colors = [
-    (0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0),
-    (255, 0, 255), (0, 255, 255), (128, 0, 128), (128, 128, 0),
-    (0, 128, 128), (128, 0, 0),
+    (0, 255, 0),    (255, 0, 0),    (0, 0, 255),    (255, 255, 0),
+    (255, 0, 255),  (0, 255, 255),  (128, 0, 128),  (128, 128, 0),
+    (0, 128, 128),  (128, 0, 0),    (0, 128, 0),    (0, 0, 128),
+    (128, 128, 128),(255, 165, 0),  (173, 216, 230),(240, 128, 128),
+    (124, 252, 0),  (218, 112, 214),(210, 105, 30), (112, 128, 144),
 ]
-max_labels    = len(mask_colors)
+max_labels    = len(mask_colors)  # 20
 current_label = 1  # 1..max_labels
 
 # ============================
 # Utility paths/names
 # ============================
 def stem(p): return Path(p).stem
-def path_bin_label(image_path, label): return os.path.join(OUT_DIR, f"{stem(image_path)}__L{label:02d}.png")
-def path_overlay(image_path):          return os.path.join(OUT_DIR, f"{stem(image_path)}__overlay.png")
-def path_image_masked(image_path):     return os.path.join(OUT_DIR, f"{stem(image_path)}__image_masked.png")
-def path_labels_color(image_path):     return os.path.join(OUT_DIR, f"{stem(image_path)}__labels_color.png")
-
+def path_bin_label(image_path, label):      return os.path.join(OUT_DIR, f"{stem(image_path)}__L{label:02d}.png")
+def path_overlay(image_path):               return os.path.join(OUT_DIR, f"{stem(image_path)}__overlay.png")
+def path_image_masked_multi(image_path):    return os.path.join(OUT_DIR, f"{stem(image_path)}__image_masked_MULTI.png")
+def path_image_masked_single(image_path,L): return os.path.join(OUT_DIR, f"{stem(image_path)}__image_masked_L{L:02d}.png")
+def path_labels_color(image_path):          return os.path.join(OUT_DIR, f"{stem(image_path)}__labels_color.png")
 
 # ============================
 # Socket helpers (toy protocol)
@@ -194,6 +207,11 @@ def radius_disp_to_full(r_disp, image_index):
     scale = (view_x1 - view_x0) / W  # pixels_in_full_per_disp_pixel horizontally
     return max(1, int(round(r_disp * scale)))
 
+def current_disp_brush_px(image_index):
+    """Compute brush size in DISPLAY pixels, relative to current display size."""
+    H, W = sizes[image_index]
+    return max(1, int(round(BRUSH_REL * min(W, H))))
+
 # ============================
 # View rendering (from FULL)
 # ============================
@@ -222,8 +240,7 @@ def mask_to_color(mask_u8):
         return out
     colors_bgr = np.array(mask_colors, dtype=np.uint8)[:, ::-1]  # RGB->BGR
     for L in np.unique(mask_u8):
-        if L == 0:
-            continue
+        if L == 0: continue
         out[mask_u8 == L] = colors_bgr[L - 1]
     return out
 
@@ -256,11 +273,20 @@ def save_image(image_index):
         overlay_bgr = blend_mask_over_image(full_bgr.copy(), labels_u8, alpha=MASK_BLEND_ALPHA)
         cv2.imwrite(path_overlay(img_path), overlay_bgr)
 
-    # 2b) image-masked png (only labeled pixels kept; background black)
-    if SAVE_OPTIONS.get("image_mask", False):
+    # 2b) image-masked MULTI (only labeled pixels kept; background black)
+    if SAVE_OPTIONS.get("image_mask_multi", False):
         keep = (labels_u8 > 0).astype(np.uint8)[:, :, None]
-        masked_bgr = (full_bgr * keep).astype(np.uint8)
-        cv2.imwrite(path_image_masked(img_path), masked_bgr)
+        masked_bgr_multi = (full_bgr * keep).astype(np.uint8)
+        cv2.imwrite(path_image_masked_multi(img_path), masked_bgr_multi)
+
+    # 2c) image-masked SINGLE per label
+    if SAVE_OPTIONS.get("image_mask_single", False):
+        for L in range(1, max_labels + 1):
+            sel = (labels_u8 == L)
+            if sel.any():
+                keepL = sel.astype(np.uint8)[:, :, None]
+                masked_bgr_single = (full_bgr * keepL).astype(np.uint8)
+                cv2.imwrite(path_image_masked_single(img_path, L), masked_bgr_single)
 
     # 3) pure label map (colorized labels only)
     if SAVE_OPTIONS.get("label_multi", False):
@@ -306,7 +332,7 @@ def on_mouse(event, x, y, flags, param):
             set_view_rect(idx, x0f, y0f, x1f, y1f)
             refresh_display(idx)
 
-    # ---- Paint mode ----
+    # ---- Paint mode (erase ONLY current label on RMB) ----
     elif mask_mode_active:
         if event == cv2.EVENT_LBUTTONDOWN:
             drawing_paint = True
@@ -314,12 +340,19 @@ def on_mouse(event, x, y, flags, param):
             drawing_paint = True
         elif event == cv2.EVENT_MOUSEMOVE and drawing_paint:
             x_full, y_full = disp_to_full(x, y, idx)
-            r_full = radius_disp_to_full(MASK_RADIUS_DISP, idx)
+            # compute dynamic brush size
+            r_disp = current_disp_brush_px(idx)
+            r_full = radius_disp_to_full(r_disp, idx)
             if flags & cv2.EVENT_FLAG_LBUTTON:
                 if 1 <= current_label <= max_labels:
                     cv2.circle(full_masks[idx], (x_full, y_full), r_full, current_label, -1)
             elif flags & cv2.EVENT_FLAG_RBUTTON:
-                cv2.circle(full_masks[idx], (x_full, y_full), r_full, 0, -1)
+                # ERASE ONLY CURRENT LABEL
+                H, W = sizes[idx]
+                brush = np.zeros((H, W), dtype=np.uint8)
+                cv2.circle(brush, (x_full, y_full), r_full, 255, -1)
+                sel = (brush > 0) & (full_masks[idx] == current_label)
+                full_masks[idx][sel] = 0
             refresh_display(idx)
         elif event == cv2.EVENT_LBUTTONUP or event == cv2.EVENT_RBUTTONUP:
             drawing_paint = False
@@ -351,10 +384,10 @@ def on_mouse(event, x, y, flags, param):
 INPUT_PATH = "./input"
 id_list = sorted([os.path.join(INPUT_PATH,f) for f in os.listdir(INPUT_PATH) if f.lower().endswith((".png", ".jpg", ".jpeg"))])
 if not id_list:
-    raise RuntimeError("No images found in current directory (png/jpg/jpeg).")
+    raise RuntimeError("No images found in ./input (png/jpg/jpeg).")
 
 # Preload all images (keep sizes as-is; window will match each image's real size)
-SCALE_X = 2.0  # example: expand image 2x in both width and height
+SCALE_X = 1.0  # set >1.0 to expand image (e.g., 2.0 doubles width & height)
 
 for p in id_list:
     arr = np.array(Image.open(p).convert("RGB"))[:, :, ::-1]  # to BGR
@@ -393,7 +426,9 @@ print("  a = label - (clamped, no wrap)")
 print("  d = label + (clamped, no wrap)")
 print("  z = zoom mode (mouse wheel or box-zoom drag)")
 print("  x = point mode (LMB=positive, RMB=negative)")
-print("  q = paint mode (LMB=paint, RMB=erase)")
+print("  q = paint mode (LMB=paint, RMB=erase current label only)")
+print("  f = smaller brush (relative to screen size)")
+print("  g = larger  brush (relative to screen size)")
 print("  e = clear current label for current image")
 print("  c = reset current image to FULL view and CLEAR ALL labels/points")
 print("  r = save ALL images (based on SAVE_OPTIONS)")
@@ -420,6 +455,10 @@ while True:
 
     # overlay transparent mask
     frame = blend_mask_over_image(frame, disp_mask, alpha=MASK_BLEND_ALPHA)
+    # show current brush size in paint mode
+    if mask_mode_active:
+        r_disp = current_disp_brush_px(idx)
+        cv2.putText(frame, f"Brush: {r_disp}px", (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (20, 220, 20), 2, cv2.LINE_AA)
     cv2.imshow("annotator", frame)
 
     key = cv2.waitKey(30) & 0xFF
@@ -475,7 +514,17 @@ while True:
         mask_mode_active  = True
         zoom_mode_active  = False
         point_mode_active = False
-        print("[mode] paint (LMB=paint, RMB=erase)")
+        print("[mode] paint (LMB=paint, RMB=erase current label only)")
+
+    elif key == ord('f'):
+        BRUSH_REL = max(BRUSH_MIN_REL, BRUSH_REL / 1.25)
+        r_disp = current_disp_brush_px(idx)
+        print(f"[brush] smaller -> rel={BRUSH_REL:.4f}, disp_px={r_disp}")
+
+    elif key == ord('g'):
+        BRUSH_REL = min(BRUSH_MAX_REL, BRUSH_REL * 1.25)
+        r_disp = current_disp_brush_px(idx)
+        print(f"[brush] larger  -> rel={BRUSH_REL:.4f}, disp_px={r_disp}")
 
     elif key == ord('e'):
         # clear CURRENT LABEL for current image
