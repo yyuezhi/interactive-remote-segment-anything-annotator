@@ -2,12 +2,14 @@
 
 # Interactive Image Annotation Tool
 
-This repository contains a Python tool for interactive **mask annotation** with support for:
+This repository contains a Python tool for interactive **mask annotation** of image with support for:
 - Freehand painting / erasing
 - Point-based interactive segmentation (connected to a backend, e.g. SAM2 server)
 - Saving multiple formats of masks and overlays
 
-It is ideally suitable for senarios where you could only run SAM remotely without monitor but you want to do SAM anotation interactively.
+It is ideally suitable for senarios where you could only run SAM2 remotely without monitor but you want to do SAM2W anotation interactively locally.
+
+<img src="./asset/demo.gif" width="600"/>
 
 ## Install
 1. Setup SAM2 at https://github.com/facebookresearch/sam2/tree/main
