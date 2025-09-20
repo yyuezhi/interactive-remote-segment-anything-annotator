@@ -1,19 +1,17 @@
-# How to use Segmentation Server
-
 # Interactive Image Annotation Tool
 
 This repository contains a Python tool for interactive **mask annotation** of image with support for:
 - Freehand painting / erasing
-- Point-based interactive segmentation (connected to a backend, e.g. SAM2 server)
+- Point-based interactive segmentation (connected to a backend, e.g. GPU server that run SAM2)
 - Saving multiple formats of masks and overlays
 
-It is ideally suitable for senarios where you could only run SAM2 remotely without monitor but you want to do SAM2W anotation interactively locally.
+It is ideally suitable for senarios where you could only run SAM2 remotely without monitor but you want to do SAM2 anotation interactively locally.
 
 <img src="./asset/demo.gif" width="600"/>
 
 ## Install
 1. Setup SAM2 at https://github.com/facebookresearch/sam2/tree/main
-2. Establish SSH link using: ```ssh -L 8003:localhost:8003 [username]@[servername]  (change your own port)```
+2. Establish SSH link using: ```ssh -L 8003:localhost:8003 [username]@[servername]```
 3. Put backend.py at server and run 
 ```python backend.py --host 0.0.0.0 --port 8003``` (You may need to change port)
 4. At local end, ```python frontend.py``` 
